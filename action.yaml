@@ -14,69 +14,70 @@ inputs:
       A JSON-like string of regex groups (e.g., '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}').
     required: true
 
+outputs:
+  results:
+    description: The results of the regex group.
+    value: ${{ steps.check.outputs.results }}
+
 runs:
   using: composite
   steps:
-    - name: Run diff regex check
-      shell: bash
-      run: |
-        #!/bin/bash
+    - name: Check file changes
+      uses: actions/github-script@v7
+      id: check
+      with:
+        script: |
+          const { before_sha, current_sha, regex_group } = {
+            before_sha: '${{ inputs.before_sha }}',
+            current_sha: '${{ inputs.current_sha }}',
+            regex_group: '${{ inputs.regex_group }}'
+          };
 
-        check_diff_regex() {
-          local before_sha="$1"
-          local current_sha="$2"
-          local regex="$3"
-          local result
-
-          result=$(git diff --name-only "$before_sha" "$current_sha" | grep -E "$regex")
-
-          if [[ -n "$result" ]]; then
-            echo "true"
-          else
-            echo "false"
-          fi
-        }
-
-        process_regex_group() {
-          local before_sha="$1"
-          local current_sha="$2"
-          local regex_group="$3"
-
-          # Parse JSON-like input using jq (install jq if not already present)
-          if ! command -v jq &> /dev/null; then
-            echo "jq could not be found. Install it and try again."
-            exit 1
-          fi
-
-          for key in $(echo "$regex_group" | jq -r 'keys[]'); do
-            local regex_array=$(echo "$regex_group" | jq -r ".$key | join(\",\")")
-            local combined_regex=""
-            local negative_regex=""
-            local positive_regex=""
-
-            for regex in $(echo "$regex_array" | tr "," "\n"); do
-              if [[ "$regex" == \!* ]]; then
-                negative_regex+="(?!$(echo $regex | sed 's/!//'))"
-              else
-                positive_regex+="($regex)|"
-              fi
-            done
+          console.log({before_sha, current_sha, regex_group});
+          
+          async function getChangedFiles(before, current) {
+            let stdout = '';
+            const options = {
+              listeners: {
+                stdout: (data) => {
+                  stdout += data.toString();
+                }
+              }
+            };
             
-            positive_regex=${positive_regex%|}
+            await exec.exec('git', ['diff', '--name-only', before, current], options);
+            return stdout.split("\n").filter(Boolean);
+          }
+          
+          async function processRegexGroup(before, current, regexGroup) {
+            const parsedGroup = JSON.parse(regexGroup);
+            const changedFiles = await getChangedFiles(before, current);
+            const results = {};
             
-            if [[ -n "$negative_regex" ]]; then
-              if [[ -n "$positive_regex" ]]; then
-                combined_regex="$negative_regex($positive_regex)"
-              else
-                combined_regex="$negative_regex.*"
-              fi
-            else
-              combined_regex="$positive_regex"
-            fi
-           
-            local result=$(check_diff_regex "$before_sha" "$current_sha" "$combined_regex")
-            echo "$key=$result" >> $GITHUB_OUTPUT
-          done
-        }
+            for (const [key, patterns] of Object.entries(parsedGroup)) {
+              const positivePatterns = patterns.filter(p => !p.startsWith("!"));
+              const negativePatterns = patterns.filter(p => p.startsWith("!")).map(p => p.substring(1));
+              
+              const positiveRegex =
+                positivePatterns.length > 0
+                  ? new RegExp(`(${positivePatterns.join('|')})`)
+                  : null;
 
-        process_regex_group "${{ inputs.before_sha }}" "${{ inputs.current_sha }}" "${{ inputs.regex_group }}"
+              const negativeRegex =
+                negativePatterns.length > 0
+                  ? new RegExp(`(${negativePatterns.join('|')})`)
+                  : null;
+
+              const matches = changedFiles.filter((file) => {
+                const isPositiveMatch = positiveRegex ? positiveRegex.test(file) : true;
+                const isNegativeMatch = negativeRegex ? negativeRegex.test(file) : false;
+                return isPositiveMatch && !isNegativeMatch;
+              });
+              
+              results[key] = matches.length > 0;
+            }
+            
+            core.setOutput('results', JSON.stringify(results));
+          }
+          
+          await processRegexGroup(before_sha, current_sha, regex_group);
