@@ -10,7 +10,8 @@ inputs:
     description: The current SHA.
     required: true
   regex_group:
-    description: A JSON-like string of regex groups (e.g., '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}').
+    description: |
+      A JSON-like string of regex groups (e.g., '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}').
     required: true
 
 runs:
