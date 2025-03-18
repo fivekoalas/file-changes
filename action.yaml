@@ -1,0 +1,81 @@
+name: file-changes
+
+description: Checks git diff against a group of regexes (JSON-like input) and returns key-value pairs of results.
+
+inputs:
+  before_sha:
+    description: The previous SHA.
+    required: true
+  current_sha:
+    description: The current SHA.
+    required: true
+  regex_group:
+    description: A JSON-like string of regex groups (e.g., '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}').
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Run diff regex check
+      shell: bash
+      run: |
+        #!/bin/bash
+
+        check_diff_regex() {
+          local before_sha="$1"
+          local current_sha="$2"
+          local regex="$3"
+          local result
+
+          result=$(git diff --name-only "$before_sha" "$current_sha" | grep -E "$regex")
+
+          if [[ -n "$result" ]]; then
+            echo "true"
+          else
+            echo "false"
+          fi
+        }
+
+        process_regex_group() {
+          local before_sha="$1"
+          local current_sha="$2"
+          local regex_group="$3"
+
+          # Parse JSON-like input using jq (install jq if not already present)
+          if ! command -v jq &> /dev/null; then
+            echo "jq could not be found. Install it and try again."
+            exit 1
+          fi
+
+          for key in $(echo "$regex_group" | jq -r 'keys[]'); do
+            local regex_array=$(echo "$regex_group" | jq -r ".$key | join(\",\")")
+            local combined_regex=""
+            local negative_regex=""
+            local positive_regex=""
+
+            for regex in $(echo "$regex_array" | tr "," "\n"); do
+              if [[ "$regex" == \!* ]]; then
+                negative_regex+="(?!$(echo $regex | sed 's/!//'))"
+              else
+                positive_regex+="($regex)|"
+              fi
+            done
+            
+            positive_regex=${positive_regex%|}
+            
+            if [[ -n "$negative_regex" ]]; then
+              if [[ -n "$positive_regex" ]]; then
+                combined_regex="$negative_regex($positive_regex)"
+              else
+                combined_regex="$negative_regex.*"
+              fi
+            else
+              combined_regex="$positive_regex"
+            fi
+           
+            local result=$(check_diff_regex "$before_sha" "$current_sha" "$combined_regex")
+            echo "$key=$result" >> $GITHUB_OUTPUT
+          done
+        }
+
+        process_regex_group "${{ inputs.before_sha }}" "${{ inputs.current_sha }}" "${{ inputs.regex_group }}"
