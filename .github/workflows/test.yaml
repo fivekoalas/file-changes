@@ -1,0 +1,76 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: npm test
+
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create commits to diff
+        id: commits
+        run: |
+          git config user.name test
+          git config user.email test@example.com
+          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p cypress/e2e/web
+          echo x > cypress/e2e/web/login.cy.ts
+          git add -A
+          git commit -qm "test commit"
+          echo "current=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p playwright/tests/web
+          echo x > playwright/tests/web/login.spec.ts
+          git add -A
+          git commit -qm "playwright commit"
+          echo "playwright=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./
+        id: changes
+        with:
+          before_sha: ${{ steps.commits.outputs.before }}
+          current_sha: ${{ steps.commits.outputs.current }}
+          pattern_type: glob
+          regex_group: '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}'
+
+      - uses: ./
+        id: regex
+        with:
+          before_sha: ${{ steps.commits.outputs.before }}
+          current_sha: ${{ steps.commits.outputs.current }}
+          regex_group: '{"web": ["^cypress/e2e/web/.*\\.cy\\.ts$"], "charts": ["^charts/.*/Chart.yaml$"]}'
+
+      - uses: ./
+        id: playwright
+        with:
+          before_sha: ${{ steps.commits.outputs.current }}
+          current_sha: ${{ steps.commits.outputs.playwright }}
+          regex_group: '{"deps":["^.*","!^playwright/tests/dynamic/.*/*.spec.ts$",
+            "!^playwright/tests/web/.*/*.spec.ts$"],"dynamic":["^playwright/tests/dynamic/.*/*.spec.ts$"],"web":["^playwright/tests/web/.*/*.spec.ts$"]}'
+
+      - name: Assert results
+        env:
+          GLOB_RESULTS: ${{ steps.changes.outputs.results }}
+          REGEX_RESULTS: ${{ steps.regex.outputs.results }}
+          PLAYWRIGHT_RESULTS: ${{ steps.playwright.outputs.results }}
+        run: |
+          echo "glob: $GLOB_RESULTS"
+          echo "regex: $REGEX_RESULTS"
+          echo "playwright: $PLAYWRIGHT_RESULTS"
+          test "$PLAYWRIGHT_RESULTS" = '{"deps":false,"dynamic":false,"web":true}'
+          test "$GLOB_RESULTS" = '{"deps":false,"dynamic":false,"web":true}'
+          test "$REGEX_RESULTS" = '{"web":true,"charts":false}'

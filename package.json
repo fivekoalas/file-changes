@@ -1,0 +1,12 @@
+{
+  "name": "file-changes",
+  "private": true,
+  "description": "A GitHub Action to match changed files with a glob group.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
