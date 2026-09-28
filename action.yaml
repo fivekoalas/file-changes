@@ -1,6 +1,6 @@
 name: file-changes
 
-description: Checks git diff against a group of regex or glob patterns (JSON-like input) and returns key-value pairs of results.
+description: Checks git diff against a group of regexes (JSON-like input) and returns key-value pairs of results.
 
 inputs:
   before_sha:
@@ -11,12 +11,8 @@ inputs:
     required: true
   regex_group:
     description: |
-      A JSON-like string of pattern groups; patterns prefixed with `!` exclude files (e.g., '{"charts": ["^charts/.*/Chart.yaml$"]}' with pattern_type regex, or '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}' with pattern_type glob).
+      A JSON-like string of regex groups; regexes are unanchored and prefixing one with `!` excludes matching files (e.g., '{"deps": ["^.*", "!^cypress/e2e/dynamic/.*\\.ts$", "!^cypress/e2e/web/.*\\.ts$"], "dynamic": ["^cypress/e2e/dynamic/.*\\.cy\\.ts$"], "web": ["^cypress/e2e/web/.*\\.cy\\.ts$"]}').
     required: true
-  pattern_type:
-    description: How patterns in regex_group are interpreted, `regex` (unanchored JavaScript regular expressions) or `glob`.
-    required: false
-    default: regex
 
 outputs:
   results:
@@ -34,7 +30,6 @@ runs:
         INPUT_BEFORE_SHA: ${{ inputs.before_sha }}
         INPUT_CURRENT_SHA: ${{ inputs.current_sha }}
         INPUT_REGEX_GROUP: ${{ inputs.regex_group }}
-        INPUT_PATTERN_TYPE: ${{ inputs.pattern_type }}
         FILE_CHANGES_PATH: ${{ github.action_path }}
       with:
         script: |

@@ -7,49 +7,27 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { EMPTY_TREE_SHA, globToRegExp, parseRegexGroup, matchGroups, getChangedFiles, run } = require('../src/file-changes');
+const { EMPTY_TREE_SHA, compileRegex, parseRegexGroup, matchGroups, getChangedFiles, run } = require('../src/file-changes');
 
 const README_GROUP = {
-  deps: ['**', '!cypress/e2e/dynamic/**/*.ts', '!cypress/e2e/web/**/*.ts'],
-  dynamic: ['cypress/e2e/dynamic/**/*.cy.ts'],
-  web: ['cypress/e2e/web/**/*.cy.ts'],
+  deps: ['^.*', '!^cypress/e2e/dynamic/.*\\.ts$', '!^cypress/e2e/web/.*\\.ts$'],
+  dynamic: ['^cypress/e2e/dynamic/.*\\.cy\\.ts$'],
+  web: ['^cypress/e2e/web/.*\\.cy\\.ts$'],
 };
 
-describe('globToRegExp', () => {
-  const cases = [
-    ['**', 'README.md', true],
-    ['**', 'a/b/c.ts', true],
-    ['**', '.github/workflows/ci.yaml', true],
-    ['*.ts', 'index.ts', true],
-    ['*.ts', 'src/index.ts', false],
-    ['src/*', 'src/a.ts', true],
-    ['src/*', 'src/a/b.ts', false],
-    ['src/**', 'src/a/b.ts', true],
-    ['src/**', 'srcx/a.ts', false],
-    ['**/*.ts', 'index.ts', true],
-    ['**/*.ts', 'a/b/index.ts', true],
-    ['**/*.ts', 'a/b/index.js', false],
-    ['a/**/b.ts', 'a/b.ts', true],
-    ['a/**/b.ts', 'a/x/y/b.ts', true],
-    ['cypress/e2e/web/**/*.cy.ts', 'cypress/e2e/web/login.cy.ts', true],
-    ['cypress/e2e/web/**/*.cy.ts', 'cypress/e2e/web/auth/login.cy.ts', true],
-    ['cypress/e2e/web/**/*.cy.ts', 'cypress/e2e/web/support.ts', false],
-    ['file?.txt', 'file1.txt', true],
-    ['file?.txt', 'file12.txt', false],
-    ['*.{js,ts}', 'a.ts', true],
-    ['*.{js,ts}', 'a.css', false],
-    ['[ab].txt', 'a.txt', true],
-    ['[!ab].txt', 'a.txt', false],
-    ['[!ab].txt', 'c.txt', true],
-    ['a.b', 'axb', false],
-    ['a+(b)', 'a+(b)', true],
-  ];
+describe('compileRegex', () => {
+  test('is unanchored', () => {
+    assert.ok(compileRegex('src/').test('app/src/index.ts'));
+  });
 
-  for (const [glob, file, expected] of cases) {
-    test(`${glob} ${expected ? 'matches' : 'does not match'} ${file}`, () => {
-      assert.equal(globToRegExp(glob).test(file), expected);
-    });
-  }
+  test('honours anchors', () => {
+    assert.ok(compileRegex('^src/').test('src/index.ts'));
+    assert.ok(!compileRegex('^src/').test('app/src/index.ts'));
+  });
+
+  test('reports invalid regexes with the pattern', () => {
+    assert.throws(() => compileRegex('**'), /Invalid regex "\*\*"/);
+  });
 });
 
 describe('parseRegexGroup', () => {
@@ -74,7 +52,7 @@ describe('parseRegexGroup', () => {
 
 describe('matchGroups', () => {
   test('README example: only web tests changed', () => {
-    assert.deepEqual(matchGroups(['cypress/e2e/web/login.cy.ts'], README_GROUP, 'glob'), {
+    assert.deepEqual(matchGroups(['cypress/e2e/web/login.cy.ts'], README_GROUP), {
       deps: false,
       dynamic: false,
       web: true,
@@ -82,7 +60,7 @@ describe('matchGroups', () => {
   });
 
   test('README example: only dynamic tests changed', () => {
-    assert.deepEqual(matchGroups(['cypress/e2e/dynamic/a/b.cy.ts'], README_GROUP, 'glob'), {
+    assert.deepEqual(matchGroups(['cypress/e2e/dynamic/a/b.cy.ts'], README_GROUP), {
       deps: false,
       dynamic: true,
       web: false,
@@ -90,7 +68,7 @@ describe('matchGroups', () => {
   });
 
   test('README example: shared dependency changed', () => {
-    assert.deepEqual(matchGroups(['package.json'], README_GROUP, 'glob'), {
+    assert.deepEqual(matchGroups(['package.json'], README_GROUP), {
       deps: true,
       dynamic: false,
       web: false,
@@ -98,7 +76,7 @@ describe('matchGroups', () => {
   });
 
   test('README example: mixed changes', () => {
-    assert.deepEqual(matchGroups(['cypress/e2e/web/login.cy.ts', 'src/app.ts'], README_GROUP, 'glob'), {
+    assert.deepEqual(matchGroups(['cypress/e2e/web/login.cy.ts', 'src/app.ts'], README_GROUP), {
       deps: true,
       dynamic: false,
       web: true,
@@ -106,12 +84,12 @@ describe('matchGroups', () => {
   });
 
   test('no changed files yields all false', () => {
-    assert.deepEqual(matchGroups([], README_GROUP, 'glob'), { deps: false, dynamic: false, web: false });
+    assert.deepEqual(matchGroups([], README_GROUP), { deps: false, dynamic: false, web: false });
   });
 
   test('only negative patterns match everything else', () => {
-    assert.deepEqual(matchGroups(['a.md'], { g: ['!*.ts'] }, 'glob'), { g: true });
-    assert.deepEqual(matchGroups(['a.ts'], { g: ['!*.ts'] }, 'glob'), { g: false });
+    assert.deepEqual(matchGroups(['a.md'], { g: ['!\\.ts$'] }), { g: true });
+    assert.deepEqual(matchGroups(['a.ts'], { g: ['!\\.ts$'] }), { g: false });
   });
 
   test('empty pattern list matches any change', () => {
@@ -123,7 +101,7 @@ describe('matchGroups', () => {
   });
 });
 
-describe('matchGroups with regex patterns (default, v1 compatible)', () => {
+describe('matchGroups: charts example', () => {
   const CHARTS = { modified_files: ['^charts/.*/Chart.yaml$'] };
 
   test('anchored regex matches Chart.yaml in any chart', () => {
@@ -137,10 +115,6 @@ describe('matchGroups with regex patterns (default, v1 compatible)', () => {
     });
   });
 
-  test('default pattern type is regex', () => {
-    assert.deepEqual(matchGroups(['charts/api/Chart.yaml'], CHARTS), matchGroups(['charts/api/Chart.yaml'], CHARTS, 'regex'));
-  });
-
   test('regex is unanchored like v1', () => {
     assert.deepEqual(matchGroups(['app/src/index.ts'], { g: ['src/'] }), { g: true });
   });
@@ -151,12 +125,8 @@ describe('matchGroups with regex patterns (default, v1 compatible)', () => {
     assert.deepEqual(matchGroups(['a.test.ts', 'a.ts'], group), { g: true });
   });
 
-  test('invalid regex explains how to switch to glob', () => {
-    assert.throws(() => matchGroups(['a.ts'], { g: ['**'] }), /Invalid regex "\*\*".*pattern_type: glob/);
-  });
-
-  test('unknown pattern type is rejected', () => {
-    assert.throws(() => matchGroups(['a.ts'], { g: ['a'] }, 'wildcard'), /pattern_type must be one of: regex, glob/);
+  test('invalid regex fails even with no changed files', () => {
+    assert.throws(() => matchGroups([], { g: ['**'] }), /Invalid regex/);
   });
 });
 
@@ -258,14 +228,13 @@ describe('git integration', () => {
         INPUT_BEFORE_SHA: first,
         INPUT_CURRENT_SHA: second,
         INPUT_REGEX_GROUP: JSON.stringify(README_GROUP),
-        INPUT_PATTERN_TYPE: 'glob',
       },
     });
     assert.deepEqual(results, { deps: false, dynamic: false, web: true });
     assert.equal(core.outputs.results, JSON.stringify(results));
   });
 
-  test('run defaults to regex patterns', async () => {
+  test('run matches anchored regexes', async () => {
     const core = fakeCore();
     await run({
       core,

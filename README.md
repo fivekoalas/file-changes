@@ -1,6 +1,6 @@
 # File Changes
 
-A GitHub Action to match changed files against groups of regex or glob patterns.
+A GitHub Action to match changed files against groups of regexes.
 
 ## Usage
 
@@ -22,26 +22,17 @@ jobs:
         with:
           before_sha: ${{ github.event.before }}
           current_sha: ${{ github.sha }}
-          pattern_type: glob
-          regex_group:  '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}'
+          regex_group: '{"deps": ["^.*", "!^cypress/e2e/dynamic/.*\\.ts$", "!^cypress/e2e/web/.*\\.ts$"], "dynamic": ["^cypress/e2e/dynamic/.*\\.cy\\.ts$"], "web": ["^cypress/e2e/web/.*\\.cy\\.ts$"]}'
 ```
 
 Read the result with `fromJSON(steps.<id>.outputs.results).<key>`, e.g. `{"deps":false,"dynamic":false,"web":true}`.
 
 ### Patterns
 
-`pattern_type` selects how patterns are read. It defaults to `regex`, so existing v1 workflows keep working.
+Each pattern is an unanchored JavaScript regular expression tested against the full path of each changed file:
 
-**`regex`** (default): unanchored JavaScript regular expressions, so use `^`/`$` to match the whole path:
-
-```yaml
-          regex_group: '{"modified_files": ["^charts/.*/Chart.yaml$"]}'
-```
-
-**`glob`**: matched against the full path of each changed file:
-
-- `*` matches within a path segment, `**` matches across segments (dotfiles included), `?` matches one character
-- `{a,b}` and `[abc]` / `[!abc]` are supported
+- Use `^` and `$` to match the whole path, e.g. `^charts/.*/Chart.yaml$`
+- Escape a literal `.` as `\\.` inside the JSON string
 - A pattern prefixed with `!` excludes matching files from the group
 
 A group is `true` when at least one changed file matches a positive pattern and no negative pattern.
