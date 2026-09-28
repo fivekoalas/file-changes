@@ -11,7 +11,7 @@ inputs:
     required: true
   regex_group:
     description: |
-      A JSON-like string of regex groups (e.g., '{"deps": ["**", "!cypress/e2e/dynamic/**/*.ts", "!cypress/e2e/web/**/*.ts"], "dynamic": ["cypress/e2e/dynamic/**/*.cy.ts"], "web": ["cypress/e2e/web/**/*.cy.ts"]}').
+      A JSON-like string of regex groups; regexes are unanchored and prefixing one with `!` excludes matching files (e.g., '{"deps": ["^.*", "!^cypress/e2e/dynamic/.*\\.ts$", "!^cypress/e2e/web/.*\\.ts$"], "dynamic": ["^cypress/e2e/dynamic/.*\\.cy\\.ts$"], "web": ["^cypress/e2e/web/.*\\.cy\\.ts$"]}').
     required: true
 
 outputs:
@@ -23,61 +23,15 @@ runs:
   using: composite
   steps:
     - name: Check file changes
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       id: check
+      env:
+        # Passed through env instead of interpolated into the script to avoid script injection.
+        INPUT_BEFORE_SHA: ${{ inputs.before_sha }}
+        INPUT_CURRENT_SHA: ${{ inputs.current_sha }}
+        INPUT_REGEX_GROUP: ${{ inputs.regex_group }}
+        FILE_CHANGES_PATH: ${{ github.action_path }}
       with:
         script: |
-          const { before_sha, current_sha, regex_group } = {
-            before_sha: '${{ inputs.before_sha }}',
-            current_sha: '${{ inputs.current_sha }}',
-            regex_group: '${{ inputs.regex_group }}'
-          };
-
-          console.log({before_sha, current_sha, regex_group});
-          
-          async function getChangedFiles(before, current) {
-            let stdout = '';
-            const options = {
-              listeners: {
-                stdout: (data) => {
-                  stdout += data.toString();
-                }
-              }
-            };
-            
-            await exec.exec('git', ['diff', '--name-only', before, current], options);
-            return stdout.split("\n").filter(Boolean);
-          }
-          
-          async function processRegexGroup(before, current, regexGroup) {
-            const parsedGroup = JSON.parse(regexGroup);
-            const changedFiles = await getChangedFiles(before, current);
-            const results = {};
-            
-            for (const [key, patterns] of Object.entries(parsedGroup)) {
-              const positivePatterns = patterns.filter(p => !p.startsWith("!"));
-              const negativePatterns = patterns.filter(p => p.startsWith("!")).map(p => p.substring(1));
-              
-              const positiveRegex =
-                positivePatterns.length > 0
-                  ? new RegExp(`(${positivePatterns.join('|')})`)
-                  : null;
-
-              const negativeRegex =
-                negativePatterns.length > 0
-                  ? new RegExp(`(${negativePatterns.join('|')})`)
-                  : null;
-
-              const matches = changedFiles.filter((file) => {
-                const isPositiveMatch = positiveRegex ? positiveRegex.test(file) : true;
-                const isNegativeMatch = negativeRegex ? negativeRegex.test(file) : false;
-                return isPositiveMatch && !isNegativeMatch;
-              });
-              
-              results[key] = matches.length > 0;
-            }
-            
-            core.setOutput('results', JSON.stringify(results));
-          }
-          
-          await processRegexGroup(before_sha, current_sha, regex_group);
+          const { run } = require(`${process.env.FILE_CHANGES_PATH}/src/file-changes.js`);
+          await run({ core, exec });
